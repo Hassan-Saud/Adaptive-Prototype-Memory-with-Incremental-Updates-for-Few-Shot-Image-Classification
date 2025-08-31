@@ -1,239 +1,151 @@
-# ResNet Backbone
-from torchdivision import models
+import torch
+import torch.nn as nn
+from torchvision import models
 
-class ResNetBackbone(nn.Module):
-    def __init__(self, num_classes):
-        super(ResNetBackbone, self).__init__()
-        # Load the pretrained ResNet model
-        self.resnet = resnet34(pretrained=True)
-        #"""
-        # Freeze the early layers
-        for name, child in self.resnet.named_children():
-            if name in ['conv1', 'bn1', 'relu', 'maxpool', 'layer1', 'layer2', 'layer3']:
-                for param in child.parameters():
-                    param.requires_grad = False
-            else:
-                # Ensure later layers are trainable
-                for param in child.parameters():
-                    param.requires_grad = True #"""
+def load_backbone(backbone_name: str) -> tuple[nn.Module, int]:
+    """
+    Loads a backbone and freezes ALL layers except the LAST major block,
+    then strips the classifier and returns (backbone_module, feature_dim).
 
-        # Remove the fully connected layer
-        self.resnet.fc = nn.Identity()
-        
-        # Placeholder for gradients and activations
-        #self.gradients = None
-        #self.activations = None
+    Backbones supported:
+      resnet18/resnet34/resnet50/resnet101  → train only layer4
+      inception_v3                			→ train only Mixed_7[a|b|c]
+      squeezenet1_1/squeezenet1_0           → train only features.12 (Fire9)
+      densenet121/densenet161/densenet169   → train only denseblock4 (+ norm5)
+      vgg16/vgg19                 			→ train only Block 5 (last conv block)
+    """
+    name = backbone_name.lower().strip()
+
+    def _pretrained(ctor):
+        # handles both newer torchvision (weights=...) and older (pretrained=True)
+        try:
+            return ctor(weights="IMAGENET1K_V1")
+        except Exception:
+            return ctor(pretrained=True)
+
+    # ---------------- ResNet ----------------
+    if name in {"resnet18", "resnet34", "resnet50", "resnet101"}:
+        ctor = {"resnet18": models.resnet18,
+                "resnet34": models.resnet34,
+                "resnet50": models.resnet50,
+                "resnet101": models.resnet101}[name]
+        m = _pretrained(ctor)
+
+        # freeze all except layer4
+        for n, p in m.named_parameters():
+            if not n.startswith("layer4."):
+                p.requires_grad = False
+
+        feat_dim = m.fc.in_features
+        m.fc = nn.Identity()
+        # keep avgpool inside the module and flatten at the end
+        backbone = nn.Sequential(
+            *(c for c in [m.conv1, m.bn1, m.relu, m.maxpool, m.layer1, m.layer2, m.layer3, m.layer4]),
+            m.avgpool,
+            nn.Flatten(1),
+        )
+        return backbone, feat_dim
+
+    # -------------- Inception v3 --------------
+    if name == "inception_v3":
+        m = _pretrained(models.inception_v3)
+        m.aux_logits = False
+        feat_dim = m.fc.in_features  # 2048 typically
+        m.fc = nn.Identity()
+
+        # freeze all except Mixed_7a/b/c
+        for n, p in m.named_parameters():
+            if "Mixed_7" not in n:
+                p.requires_grad = False
+
+        # Build a feature-only forward (up to Mixed_7c), then GAP + flatten
+        backbone = nn.Sequential(
+            m.Conv2d_1a_3x3, m.Conv2d_2a_3x3, m.Conv2d_2b_3x3, m.maxpool1,
+            m.Conv2d_3b_1x1, m.Conv2d_4a_3x3, m.maxpool2,
+            m.Mixed_5b, m.Mixed_5c, m.Mixed_5d,
+            m.Mixed_6a, m.Mixed_6b, m.Mixed_6c, m.Mixed_6d, m.Mixed_6e,
+            m.Mixed_7a, m.Mixed_7b, m.Mixed_7c,
+            nn.AdaptiveAvgPool2d((1, 1)),
+            nn.Flatten(1),
+        )
+        return backbone, feat_dim
+
+    # -------- SqueezeNet 1.0 --------
+    if name == "squeezenet1_0":
+        m = _pretrained(models.squeezenet1_0)
+        for n, p in m.named_parameters():
+            if "features.12" not in n:
+                p.requires_grad = False
+                
+        feat_dim = 512
+        backbone = nn.Sequential(
+            m.features,
+            nn.AdaptiveAvgPool2d((1, 1)),
+            nn.Flatten(1),
+        )
+        return backbone, feat_dim
     
-    #def activations_hook(self, grad):
-        #self.gradients = grad
-    
-    def forward(self, x):
-        # Forward pass through the ResNet layers
-        x = self.resnet.conv1(x)
-        x = self.resnet.bn1(x)
-        x = self.resnet.relu(x)
-        x = self.resnet.maxpool(x)
-        x = self.resnet.layer1(x)
-        x = self.resnet.layer2(x)
-        x = self.resnet.layer3(x)
-        x = self.resnet.layer4(x)
-        
-        # Save activations and register hook for gradients
-        #self.activations = x  # Save activations from layer4
-        #x.register_hook(self.activations_hook)  # Hook to get gradients
-        #print(f"Activation shape after layer4: {x.shape}")
-        
-        x = self.resnet.avgpool(x)
-        x = torch.flatten(x, 1)
-        return x
+    # -------- SqueezeNet 1.1 --------
+    if name == "squeezenet1_1":
+        m = _pretrained(models.squeezenet1_1)
+        for n, p in m.named_parameters():
+            if "features.12" not in n:
+                p.requires_grad = False
+        feat_dim = 512
+        backbone = nn.Sequential(
+            m.features,
+            nn.AdaptiveAvgPool2d((1, 1)),
+            nn.Flatten(1),
+        )
+        return backbone, feat_dim
 
 
-# Inception Backbone
-# Define the InceptionBackbone class
-class InceptionBackbone(nn.Module):
-    def __init__(self, num_classes):
-        super(InceptionBackbone, self).__init__()
-        
-        # Load the pretrained InceptionV3 model
-        self.inception = models.inception_v3(pretrained=True)
-        self.num_classes = num_classes
-        
-        # Freeze all layers except the last block
-        for name, param in self.inception.named_parameters():
-            if "Mixed_7" not in name:  # Only unfreeze the last block (Mixed_7)
-                param.requires_grad = False
+    # -------------- DenseNet (121/161) --------------
+    if name in {"densenet121", "densenet161", "densenet169"}:
+        ctor = {"densenet121": models.densenet121,
+                "densenet161": models.densenet161,
+                "densenet169": models.densenet169}[name]
+        m = _pretrained(ctor)
 
-        
-        # Replace the classifier with a new one for the required number of classes
-        self.inception.fc = nn.Identity()
+        # freeze all except denseblock4 and final norm5
+        for n, p in m.named_parameters():
+            if not n.startswith("features.denseblock4"):
+                p.requires_grad = False
 
-        # Placeholders for gradients and activations (for Grad-CAM, if needed)
-        self.gradients = None
-        self.activations = None
+        feat_dim = m.classifier.in_features  # e.g., 1024 (121) / 2208 (161)
+        m.classifier = nn.Identity()
 
-    def activations_hook(self, grad):
-        self.gradients = grad
+        backbone = nn.Sequential(
+            m.features,
+            nn.ReLU(inplace=True),
+            nn.AdaptiveAvgPool2d((1, 1)),
+            nn.Flatten(1),
+        )
+        return backbone, feat_dim
 
-    def forward(self, x):
-        # Pass input through the convolutional feature extractor
-        x = self.inception.Conv2d_1a_3x3(x)
-        x = self.inception.Conv2d_2a_3x3(x)
-        x = self.inception.Conv2d_2b_3x3(x)
-        x = self.inception.maxpool1(x)
-        x = self.inception.Conv2d_3b_1x1(x)
-        x = self.inception.Conv2d_4a_3x3(x)
-        x = self.inception.maxpool2(x)
-        x = self.inception.Mixed_5b(x)
-        x = self.inception.Mixed_5c(x)
-        x = self.inception.Mixed_5d(x)
-        x = self.inception.Mixed_6a(x)
-        x = self.inception.Mixed_6b(x)
-        x = self.inception.Mixed_6c(x)
-        x = self.inception.Mixed_6d(x)
-        x = self.inception.Mixed_6e(x)
-        x = self.inception.Mixed_7a(x)
-        x = self.inception.Mixed_7b(x)
-        x = self.inception.Mixed_7c(x)
-        
-        # Save activations and register a hook to capture gradients (for Grad-CAM, if needed)
-        self.activations = x
-        x.register_hook(self.activations_hook)
-        
-        # Apply global average pooling
-        x = torch.nn.functional.adaptive_avg_pool2d(x, (1, 1))  # Reduces spatial dimensions to 1x1
-        x = torch.flatten(x, 1)  # Flatten the tensor
-        
-        return x
+    # -------------- VGG (16/19) --------------
+    if name in {"vgg16", "vgg19"}:
+        ctor = {"vgg16": models.vgg16, "vgg19": models.vgg19}[name]
+        m = _pretrained(ctor)
 
+        # Block 5 is the last conv block.
+        # For vgg16, layers < 24 are blocks 1–4; for vgg19, layers < 26 are blocks 1–4.
+        cutoff = 24 if name == "vgg16" else 26
+        for idx, layer in m.features.named_children():
+            if int(idx) < cutoff:
+                for p in layer.parameters():
+                    p.requires_grad = False
 
-#SqueezeNet Backbone
+        # Replace avgpool to 1x1; remove classifier
+        m.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+        m.classifier = nn.Identity()
+        feat_dim = 512  # VGG final conv channels
 
-class SqueezeNetBackbone(nn.Module):
-    def __init__(self, feature_dim, num_classes):
-        super(SqueezeNetBackbone, self).__init__()
-        
-        # Load pretrained SqueezeNet
-        self.squeezenet = models.squeezenet1_1(pretrained=True)  # Using 1.1 version (more stable)
-        self.num_classes = num_classes
-        self.feature_dim = feature_dim
-        
-        # Freeze all layers except the last fire block (fire9)
-        for name, param in self.squeezenet.named_parameters():
-            if "features.12" not in name:  # fire9 is features.12 in SqueezeNet1.1 and features.10 for 1_0
-                param.requires_grad = False
-       
-        # New single FC layer (input channels = 512 for SqueezeNet1.1)
-        self.final_fc = nn.Identity()
+        backbone = nn.Sequential(
+            m.features,
+            m.avgpool,
+            nn.Flatten(1),
+        )
+        return backbone, feat_dim
 
-        # Placeholders for Grad-CAM (optional)
-        self.gradients = None
-        self.activations = None
-
-    def activations_hook(self, grad):
-        self.gradients = grad
-
-    def forward(self, x):
-        # Forward through feature extractor
-        x = self.squeezenet.features(x)
-        
-        # Save activations for Grad-CAM (optional)
-        self.activations = x
-        x.register_hook(self.activations_hook)
-        
-        # Apply global average pooling
-        x = torch.nn.functional.adaptive_avg_pool2d(x, (1, 1))  # Reduces spatial dimensions to 1x1
-        x = torch.flatten(x, 1)  # Flatten the tensor
-        
-        return x
-		
-		
-#DenseNet Backbone
-
-class DenseNetBackbone(nn.Module):
-    def __init__(self, num_classes):
-        super(DenseNetBackbone, self).__init__()
-        global FEATURE_DIM
-        # Load the pretrained DenseNet model (we'll use densenet161 here)
-        self.densenet = models.densenet161(pretrained=True)
-        self.num_classes = num_classes
-        
-        # Freeze all layers except the last dense block
-        for name, param in self.densenet.named_parameters():
-            if "denseblock4" not in name:  # Only unfreeze the last dense block
-                param.requires_grad = False
-        
-        # Extract the input features of the final classifier layer
-        FEATURE_DIM = self.densenet.classifier.in_features
-        
-        # Replace classifier with Identity since we only need features
-        self.densenet.classifier = nn.Identity()
-        
-        # --- Grad-CAM placeholders ---
-        self.gradients = None
-        self.activations = None
-
-    def activations_hook(self, grad):
-        """Hook to save gradients for Grad-CAM."""
-        self.gradients = grad
-
-    def forward(self, x):
-        # Pass input through DenseNet feature extractor
-        x = self.densenet.features(x)
-        
-        # --- Grad-CAM logic (disabled) ---
-        self.activations = x
-        x.register_hook(self.activations_hook)
-        
-        # Apply global average pooling
-        x = torch.nn.functional.adaptive_avg_pool2d(x, (1, 1))  # Reduces spatial dims to 1x1
-        x = torch.flatten(x, 1)  # Flatten
-        
-        return x
-
-
-#VGG Backbone
-class VGG16Backbone(nn.Module):
-    def __init__(self, num_classes):
-        super(VGG16Backbone, self).__init__()
-        # Load the pretrained VGG16 model
-        self.vgg = models.vgg19(pretrained=True)
-        self.num_classes = num_classes
-        
-        # Freeze all layers except the last block (Block 5)
-        for name, layer in self.vgg.features.named_children():
-            # Freeze layers up to and including Block 4 (layer indices 0 to 23 for vgg16 and 26 for vgg19)
-            if int(name) < 26:  # This will cover layers from 0 to Block 4
-                for param in layer.parameters():
-                    param.requires_grad = False
-            else:  # Fine-tune Block 5
-                for param in layer.parameters():
-                    param.requires_grad = True
-        
-        
-        # Replace the average pooling to perform global pooling (1x1 output)
-        self.vgg.avgpool = nn.AdaptiveAvgPool2d((1, 1))
-        
-        # Remove the fully connected classifier by setting it to an identity
-        self.vgg.classifier = nn.Identity()
-        
-        # Placeholders for gradients and activations
-        self.gradients = None
-        self.activations = None
-
-    def activations_hook(self, grad):
-        self.gradients = grad
-
-    def forward(self, x):
-        # Pass input through the convolutional feature extractor
-        x = self.vgg.features(x)
-        
-        # Save activations and register a hook to capture gradients
-        self.activations = x
-        x.register_hook(self.activations_hook)
-        
-        # Apply the global average pooling and flatten the output
-        x = self.vgg.avgpool(x)
-        x = torch.flatten(x, 1)
-        
-        return x
-
+    raise ValueError(f"Unsupported backbone_name: {backbone_name!r}")
