@@ -97,11 +97,8 @@ def validate(model, val_loader, criterion, return_loss=False):
 
 # Define the Backbone
 
-#backbone = Models.InceptionBackbone(NUM_CLASSES)
-#backbone = Models.SqueezeNetBackbone(512, NUM_CLASSES)
-#backbone = Models.VGG16Backbone(NUM_CLASSES)
-#backbone = Models.DenseNetBackbone(NUM_CLASSES)
-backbone = Models.ResNetBackbone(NUM_CLASSES)
+backbone_name = "resnet34"
+backbone, FEATURE_DIM = Models.load_backbone(backbone_name)
 
 #Instantiate APM
 model = APM.MemoryEnabledCNN(backbone, NUM_CLASSES, FEATURE_DIM)
@@ -150,7 +147,6 @@ def train(model, train_loader, val_loader, criterion, optimizer, scheduler, num_
     train_accs = []
     val_accs = []
     average = 0
-    current_lr_m = 0.6
     val_acc = 0
     precision, recall, f1 = 0, 0, 0
     av_pre, av_re, av_f1 = 0, 0, 0
@@ -211,7 +207,7 @@ def train(model, train_loader, val_loader, criterion, optimizer, scheduler, num_
                     conflict += 1
   
                 
-                memory_loss = model.memory_module.update_memory(features_i, attention_scores_i, true_label, predicted_slot_i, current_lr_m)
+                memory_loss = model.memory_module.update_memory(features_i, attention_scores_i, true_label, predicted_slot_i)
             
                 
         print(f'Total Conflicts: {conflict}')
@@ -244,9 +240,7 @@ def train(model, train_loader, val_loader, criterion, optimizer, scheduler, num_
         
         # Step the learning rate scheduler
         scheduler.step()
-        #current_lr_m -= 0.05
-        #if epoch < 9:
-            #model.memory_module.memory_labels = [-1] * NUM_CLASSES
+     
         
     val_precision, val_recall, val_f1, val_accuracy = av_pre/num_epochs, av_re/num_epochs, av_f1/num_epochs, average/num_epochs # Metrics for Histogram
     print(f"Average Training Accuracy: {average/num_epochs}") # Training Metric
@@ -359,3 +353,4 @@ def test(model, test_loader, criterion):
 # Test
 
 test(model, test_loader, criterion)
+
