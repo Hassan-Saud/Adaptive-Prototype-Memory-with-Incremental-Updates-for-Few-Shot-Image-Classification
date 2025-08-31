@@ -28,7 +28,7 @@ class MemoryModule(nn.Module):
     
 
     # Memory Update Mechanism
-    def update_memory(self, features, attention_scores, true_label, predicted_slot, base_lr=0.02):
+    def update_memory(self, features, attention_scores, true_label, predicted_slot):
         
         update_count = 0
         
@@ -75,6 +75,7 @@ class MemoryEnabledCNN(nn.Module):
         features = self.backbone(x)
         attention_scores, predicted_slot, predicted_label = self.memory_module(features)
         return predicted_label, features, attention_scores, predicted_slot
+
 
 
 
