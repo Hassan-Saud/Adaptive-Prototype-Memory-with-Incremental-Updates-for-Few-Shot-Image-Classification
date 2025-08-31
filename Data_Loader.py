@@ -1125,7 +1125,7 @@ def prepare_cifar():
 	# Get class names for the selected classes
 	class_names = [all_class_names[i] for i in selected_classes]
 	
-	return train_loader, eval_loader, test_loader
+	return train_loader, eval_loader, test_loader, NUM_CLASSES
 	
 	
 def prepare_omniglot():
@@ -1270,7 +1270,7 @@ def prepare_omniglot():
 	class_names = [all_labels[i] for i in selected_labels]
 	print(f"Selected Class Names: {class_names}")
 	
-	return train_loader, eval_loader, test_loader
+	return train_loader, eval_loader, test_loader, NUM_CLASSES
 
 
 def prepare_cub(data_path):
@@ -1410,7 +1410,7 @@ def prepare_cub(data_path):
 	class_names = [filtered_class_indices[i] for i in selected_class_indices]
 	print(f"Selected Classes: {class_names}")
 
-	return train_loader, eval_lodaer, test_loader
+	return train_loader, eval_lodaer, test_loader, NUM_CLASSES
 
 
 def prepare_caltech(data_path):
@@ -1554,7 +1554,7 @@ def prepare_caltech(data_path):
 	class_names = [filtered_class_indices[i] for i in selected_class_indices]
 	print(f"Selected Classes: {class_names}")
 
-	return train_loader, eval_loader, test_loader
+	return train_loader, eval_loader, test_loader, NUM_CLASSES
 
 
 def prepare_eurosat(data_path):
@@ -1688,4 +1688,5 @@ def prepare_eurosat(data_path):
 	# Get class names for the selected classes
 	class_names = [all_class_names[i] for i in selected_class_indices]
 
-	return train_loader, eval_loader, test_loader
+	return train_loader, eval_loader, test_loader, NUM_CLASSES
+
