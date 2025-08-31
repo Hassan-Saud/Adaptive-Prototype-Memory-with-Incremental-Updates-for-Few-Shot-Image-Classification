@@ -43,11 +43,12 @@ NUM_EPOCHS = 10
 LEARNING_RATE = 0.001 #0.000045 is stable learning rate for now (pre-trained ResNet only), after 15 to 20 epochs accuracy gain becomes smaller
 
 # data_path refers to the path of your dataset.
+# data_path = path to the data directory
 # train_loader, eval_loader, test_loader = Data_Loader.prepare_cifar()
 # train_loader, eval_loader, test_loader = Data_Loader.prepare_cub(data_path)
 # train_loader, eval_loader, test_loader = Data_Loader.prepare_caltech(data_path)
 # train_loader, eval_loader, test_loader = Data_Loader.prepare_eurosat(data_path)
-train_loader, eval_loader, test_loader = Data_Loader.prepare_omniglot()
+train_loader, eval_loader, test_loader, NUM_CLASSES = Data_Loader.prepare_omniglot()
 
 def validate(model, val_loader, criterion, return_loss=False):
     model.eval()
@@ -356,4 +357,5 @@ def test(model, test_loader, criterion):
     PLOT.plot_metrics_histogram_acc(val_accuracy, val_precision, val_recall, val_f1, accuracy, precision, recall, f1) # val/test precision, recall, f1, accuracy histogram
 
 # Test
+
 test(model, test_loader, criterion)
