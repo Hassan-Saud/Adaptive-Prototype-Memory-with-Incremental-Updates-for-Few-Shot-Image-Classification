@@ -130,7 +130,7 @@ def load_backbone(backbone_name: str) -> tuple[nn.Module, int]:
 
         # Block 5 is the last conv block.
         # For vgg16, layers < 24 are blocks 1–4; for vgg19, layers < 26 are blocks 1–4.
-        cutoff = 24 if name == "vgg16" else 26
+        cutoff = 24 if name == "vgg16" else 27
         for idx, layer in m.features.named_children():
             if int(idx) < cutoff:
                 for p in layer.parameters():
@@ -149,3 +149,4 @@ def load_backbone(backbone_name: str) -> tuple[nn.Module, int]:
         return backbone, feat_dim
 
     raise ValueError(f"Unsupported backbone_name: {backbone_name!r}")
+
